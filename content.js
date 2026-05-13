@@ -3,6 +3,8 @@
 
   let enabled = true;
   const isMusic = location.hostname === 'music.youtube.com';
+  let overlay = null;
+  let adStartTime = 0;
 
   const YT_SELECTORS = [
     'ytd-ad-slot-renderer',
@@ -45,6 +47,70 @@
     );
   }
 
+  function hasSkipButton() {
+    return !!document.querySelector(
+      '.ytp-ad-skip-button, .ytp-ad-skip-button-modern'
+    );
+  }
+
+  function showOverlay() {
+    if (overlay) return;
+    overlay = document.createElement('div');
+    overlay.id = 'yab-overlay';
+    overlay.style.cssText =
+      'position:fixed;top:0;left:0;width:100%;height:100%;z-index:999999;background:#000;pointer-events:none;';
+    document.body.appendChild(overlay);
+  }
+
+  function hideOverlay() {
+    if (overlay) {
+      overlay.remove();
+      overlay = null;
+    }
+  }
+
+  function killAdVideo() {
+    const player = document.getElementById('movie_player');
+    const video = document.querySelector('video');
+    if (video) {
+      video.pause();
+      video.src = '';
+      video.load();
+      video.muted = true;
+    }
+    if (player && typeof player.stopVideo === 'function') {
+      player.stopVideo();
+    }
+    const videoId = new URLSearchParams(window.location.search).get('v');
+    if (videoId && player && typeof player.loadVideoById === 'function') {
+      player.loadVideoById({ videoId, startSeconds: 0 });
+    }
+  }
+
+  function handleAdStart() {
+    if (!enabled) return;
+    adStartTime = Date.now();
+    const skipBtn = hasSkipButton();
+    if (skipBtn) {
+      document.querySelector(
+        '.ytp-ad-skip-button, .ytp-ad-skip-button-modern'
+      ).click();
+    }
+    const video = document.querySelector('video');
+    if (video) video.muted = true;
+
+    if (!skipBtn) {
+      showOverlay();
+    }
+  }
+
+  function handleAdEnd() {
+    hideOverlay();
+    adStartTime = 0;
+    const video = document.querySelector('video');
+    if (video) video.muted = false;
+  }
+
   function removeAds() {
     if (!enabled) return;
     for (const sel of AD_SELECTORS) {
@@ -70,15 +136,9 @@
       );
     }
     if (btn) btn.click();
-
     if (video && adPlayerVisible()) {
       video.muted = true;
       video.playbackRate = 16;
-      video.currentTime = 1e10;
-      const player = document.getElementById('movie_player');
-      if (player && typeof player.stopVideo === 'function') {
-        player.stopVideo();
-      }
     }
   }
 
@@ -97,6 +157,12 @@
       adShowing = adPlayerVisible();
     }
 
+    if (adShowing && !isMusic && !hasSkipButton()) {
+      showOverlay();
+    }
+    if (!adShowing) {
+      hideOverlay();
+    }
     video.muted = adShowing;
   }
 
@@ -111,6 +177,9 @@
     }
     .html5-video-player.ad-showing video {
       opacity: 0 !important;
+    }
+    #movie_player.ad-showing {
+      pointer-events: none !important;
     }
   `;
   document.documentElement.appendChild(style);
@@ -127,17 +196,15 @@
     const attrObserver = new MutationObserver(() => {
       if (!enabled) return;
       if (playerEl.classList.contains('ad-showing')) {
+        handleAdStart();
         removeAds();
         const video = document.querySelector('video');
         if (video) {
           video.muted = true;
-          video.currentTime = 1e10;
           video.playbackRate = 16;
         }
-        const skipBtn = document.querySelector(
-          '.ytp-ad-skip-button, .ytp-ad-skip-button-modern'
-        );
-        if (skipBtn) skipBtn.click();
+      } else {
+        handleAdEnd();
       }
     });
     attrObserver.observe(playerEl, {
@@ -160,20 +227,28 @@
       if (skipBtn) skipBtn.click();
       if (video) video.muted = adActive;
     } else {
-      const skipBtn = document.querySelector(
-        '.ytp-ad-skip-button, .ytp-ad-skip-button-modern'
-      );
-      if (adPlayerVisible()) {
-        if (skipBtn) skipBtn.click();
+      const showing = adPlayerVisible();
+      const skipBtn = hasSkipButton();
+
+      if (showing) {
+        if (skipBtn) {
+          document.querySelector(
+            '.ytp-ad-skip-button, .ytp-ad-skip-button-modern'
+          ).click();
+        }
         if (video) {
           video.muted = true;
-          video.currentTime = 1e10;
           video.playbackRate = 16;
         }
-        const player = document.getElementById('movie_player');
-        if (player && typeof player.stopVideo === 'function') {
-          player.stopVideo();
+        if (!skipBtn) {
+          showOverlay();
+          if (adStartTime > 0 && Date.now() - adStartTime > 5000) {
+            killAdVideo();
+          }
         }
+      } else {
+        if (adStartTime > 0) handleAdEnd();
+        hideOverlay();
       }
     }
   }, 300);
@@ -182,6 +257,7 @@
     if (msg.type === 'TOGGLE') {
       enabled = msg.enabled;
       if (enabled) {
+        hideOverlay();
         removeAds();
         style.textContent = `
           ${AD_SELECTORS.join(',\n    ')} {
@@ -193,8 +269,12 @@
           .html5-video-player.ad-showing video {
             opacity: 0 !important;
           }
+          #movie_player.ad-showing {
+            pointer-events: none !important;
+          }
         `;
       } else {
+        hideOverlay();
         style.textContent = '';
       }
     }
