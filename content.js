@@ -70,8 +70,15 @@
       );
     }
     if (btn) btn.click();
-    if (video && adPlayerVisible() && !btn) {
-      video.currentTime = video.duration || 1e10;
+
+    if (video && adPlayerVisible()) {
+      video.muted = true;
+      video.playbackRate = 16;
+      video.currentTime = 1e10;
+      const player = document.getElementById('movie_player');
+      if (player && typeof player.stopVideo === 'function') {
+        player.stopVideo();
+      }
     }
   }
 
@@ -102,16 +109,42 @@
     ytd-watch-next-secondary-results-renderer {
       z-index: auto !important;
     }
+    .html5-video-player.ad-showing video {
+      opacity: 0 !important;
+    }
   `;
   document.documentElement.appendChild(style);
 
   removeAds();
 
-  const observer = new MutationObserver(() => removeAds());
-  observer.observe(document.body || document.documentElement, {
-    childList: true,
-    subtree: true,
-  });
+  const body = document.body || document.documentElement;
+  const domObserver = new MutationObserver(() => removeAds());
+  domObserver.observe(body, { childList: true, subtree: true });
+
+  const playerEl = document.getElementById('movie_player') ||
+    document.querySelector('.html5-video-player');
+  if (playerEl) {
+    const attrObserver = new MutationObserver(() => {
+      if (!enabled) return;
+      if (playerEl.classList.contains('ad-showing')) {
+        removeAds();
+        const video = document.querySelector('video');
+        if (video) {
+          video.muted = true;
+          video.currentTime = 1e10;
+          video.playbackRate = 16;
+        }
+        const skipBtn = document.querySelector(
+          '.ytp-ad-skip-button, .ytp-ad-skip-button-modern'
+        );
+        if (skipBtn) skipBtn.click();
+      }
+    });
+    attrObserver.observe(playerEl, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+  }
 
   setInterval(() => {
     if (!enabled) return;
@@ -134,11 +167,16 @@
         if (skipBtn) skipBtn.click();
         if (video) {
           video.muted = true;
-          video.currentTime = video.duration || 1e10;
+          video.currentTime = 1e10;
+          video.playbackRate = 16;
+        }
+        const player = document.getElementById('movie_player');
+        if (player && typeof player.stopVideo === 'function') {
+          player.stopVideo();
         }
       }
     }
-  }, 1000);
+  }, 300);
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === 'TOGGLE') {
@@ -151,6 +189,9 @@
           }
           ytd-watch-next-secondary-results-renderer {
             z-index: auto !important;
+          }
+          .html5-video-player.ad-showing video {
+            opacity: 0 !important;
           }
         `;
       } else {
@@ -172,12 +213,12 @@
     for (const sel of AD_SELECTORS) {
       count += document.querySelectorAll(sel).length;
     }
-    count += document.querySelectorAll('[is-promo], [ad-active]').length +
-      document.querySelectorAll('#movie_player.ad-showing, .html5-video-player.ad-showing').length;
+    count +=
+      document.querySelectorAll('[is-promo], [ad-active]').length +
+      document.querySelectorAll(
+        '#movie_player.ad-showing, .html5-video-player.ad-showing'
+      ).length;
     chrome.runtime.sendMessage({ type: 'AD_COUNT', count });
   });
-  countObserver.observe(document.body || document.documentElement, {
-    childList: true,
-    subtree: true,
-  });
+  countObserver.observe(body, { childList: true, subtree: true });
 })();
