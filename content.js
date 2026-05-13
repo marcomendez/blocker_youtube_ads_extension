@@ -21,6 +21,8 @@
     'ytd-ad-slot-renderer[ad-duration]',
     '#masthead-ad',
     '.ytd-video-masthead-ad-v3-renderer',
+    '.ytp-ad-persistent-progress-bar-container',
+    '.ytp-ad-progress-list',
   ];
 
   const MUSIC_SELECTORS = [
@@ -35,6 +37,13 @@
   ];
 
   const AD_SELECTORS = isMusic ? MUSIC_SELECTORS : YT_SELECTORS;
+
+  function adPlayerVisible() {
+    return !!(
+      document.querySelector('#movie_player.ad-showing') ||
+      document.querySelector('.html5-video-player.ad-showing')
+    );
+  }
 
   function removeAds() {
     if (!enabled) return;
@@ -52,6 +61,7 @@
 
   function tryAutoSkip() {
     let btn;
+    const video = document.querySelector('video');
     if (isMusic) {
       btn = document.querySelector('ytmusic-skip-ad-button');
     } else {
@@ -60,6 +70,9 @@
       );
     }
     if (btn) btn.click();
+    if (video && adPlayerVisible() && !btn) {
+      video.currentTime = video.duration || 1e10;
+    }
   }
 
   function muteAdSegment() {
@@ -74,7 +87,7 @@
         document.querySelector('ytmusic-mealbar-promo-renderer')
       );
     } else {
-      adShowing = !!document.querySelector('.ytp-ad-player-overlay');
+      adShowing = adPlayerVisible();
     }
 
     video.muted = adShowing;
@@ -100,10 +113,10 @@
     subtree: true,
   });
 
-  if (isMusic) {
-    setInterval(() => {
-      if (!enabled) return;
-      const video = document.querySelector('video');
+  setInterval(() => {
+    if (!enabled) return;
+    const video = document.querySelector('video');
+    if (isMusic) {
       const skipBtn = document.querySelector('ytmusic-skip-ad-button');
       const adActive = !!(
         document.querySelector('ytmusic-player-bar[ad-active]') ||
@@ -113,8 +126,19 @@
       );
       if (skipBtn) skipBtn.click();
       if (video) video.muted = adActive;
-    }, 1000);
-  }
+    } else {
+      const skipBtn = document.querySelector(
+        '.ytp-ad-skip-button, .ytp-ad-skip-button-modern'
+      );
+      if (adPlayerVisible()) {
+        if (skipBtn) skipBtn.click();
+        if (video) {
+          video.muted = true;
+          video.currentTime = video.duration || 1e10;
+        }
+      }
+    }
+  }, 1000);
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === 'TOGGLE') {
@@ -148,7 +172,8 @@
     for (const sel of AD_SELECTORS) {
       count += document.querySelectorAll(sel).length;
     }
-    count += document.querySelectorAll('[is-promo], [ad-active]').length;
+    count += document.querySelectorAll('[is-promo], [ad-active]').length +
+      document.querySelectorAll('#movie_player.ad-showing, .html5-video-player.ad-showing').length;
     chrome.runtime.sendMessage({ type: 'AD_COUNT', count });
   });
   countObserver.observe(document.body || document.documentElement, {
